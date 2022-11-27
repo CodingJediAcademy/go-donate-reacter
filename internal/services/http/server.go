@@ -18,7 +18,7 @@ func (s *Server) Run(ctx context.Context) {
 	})
 
 	app.Get("/", func(c *fiber.Ctx) error {
-		return c.SendString("Hello, World 👋!")
+		return c.SendString(c.Query("code"))
 	})
 
 	go func() {
