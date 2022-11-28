@@ -1,7 +1,6 @@
 package donationalerts
 
 import (
-	"fmt"
 	"github.com/centrifugal/centrifuge-go"
 	"github.com/gofiber/fiber/v2"
 	"github.com/imroc/req/v3"
@@ -11,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"time"
 )
 
 const (
@@ -85,15 +83,9 @@ func (cent *Centrifuge) Connect(ctx context.Context) {
 	})
 	client.SetToken(cent.SocketToken)
 	//defer func() { _ = client.Close() }()
-	doneCh := make(chan error, 1)
 	handler := &testEventHandler{
 		onConnect: func(c *centrifuge.Client, e centrifuge.ConnectEvent) {
 			log.Printf("%#v\n", e)
-			if e.ClientID == "" {
-				doneCh <- fmt.Errorf("wrong client ID value")
-				return
-			}
-			close(doneCh)
 			cent.ClientID = e.ClientID
 			cent.Channel = "$alerts:donation_" + strconv.FormatInt(cent.UserID, 10)
 			err := cent.GetChannelToken()
@@ -116,14 +108,10 @@ func (cent *Centrifuge) Connect(ctx context.Context) {
 	client.OnDisconnect(handler)
 	client.OnMessage(handler)
 	client.OnPrivateSub(handler)
-	_ = client.Connect()
-	select {
-	case err := <-doneCh:
-		if err != nil {
-			log.Printf("finish with error: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		log.Println("expecting successful connect")
+
+	err := client.Connect()
+	if err != nil {
+		log.Fatalln(err)
 	}
 
 	cent.Client = client
@@ -144,7 +132,7 @@ func (cent *Centrifuge) Subscribe(ctx context.Context) {
 	log.Println(sub.Channel())
 	handler := &testPublishHandler{
 		onPublish: func(c *centrifuge.Subscription, e centrifuge.PublishEvent) {
-			log.Printf("%#v\n", e)
+			log.Printf("%#v\n", string(e.Data))
 		},
 	}
 	sub.OnPublish(handler)

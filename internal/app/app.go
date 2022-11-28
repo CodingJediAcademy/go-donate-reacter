@@ -43,20 +43,20 @@ func (a *App) connectToDA(ctx context.Context) {
 		os.Getenv("GDR_DA_REDIRECT_URL"),
 	)
 	log.Println(daClient.AuthLink())
-	token, err := daClient.NewToken(os.Getenv("GDR_DA_TOKEN"))
+	err := daClient.NewToken(os.Getenv("GDR_DA_CODE"))
 	if err != nil {
 		log.Println(err)
 	}
-	log.Printf("%#v", token)
+	log.Printf("%#v", daClient.Token.AccessToken)
 
-	profile, err := daClient.Profile(token.AccessToken)
+	profile, err := daClient.Profile()
 	if err != nil {
 		log.Println(err)
 	}
 	log.Printf("%#v", profile)
 
 	cent := donationalerts.Centrifuge{
-		AccessToken: token.AccessToken,
+		AccessToken: daClient.Token.AccessToken,
 		SocketToken: profile.Data.SocketToken,
 		UserID:      profile.Data.ID,
 	}
