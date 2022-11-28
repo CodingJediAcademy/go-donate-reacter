@@ -5,6 +5,9 @@ import (
 	"github.com/centrifugal/centrifuge-go"
 	"github.com/gofiber/fiber/v2"
 	"github.com/imroc/req/v3"
+	"go-donate-reacter/internal/services/donationalerts/request"
+	"go-donate-reacter/internal/services/donationalerts/response"
+	"golang.org/x/net/context"
 	"log"
 	"net/http"
 	"strconv"
@@ -68,7 +71,7 @@ func (h *testEventHandler) OnPrivateSub(c *centrifuge.Client, e centrifuge.Priva
 	return "", nil
 }
 
-func (cent *Centrifuge) Connect() {
+func (cent *Centrifuge) Connect(ctx context.Context) {
 	header := http.Header{}
 	header.Add("Authorization", "Bearer "+cent.AccessToken)
 	client := centrifuge.NewJsonClient(DA_CENT_WEBSOCKET_URL, centrifuge.Config{
@@ -80,7 +83,6 @@ func (cent *Centrifuge) Connect() {
 		Header:               header,
 		Name:                 centrifuge.DefaultName,
 	})
-	//client.SetHeader("Authorization", "Bearer "+cent.AccessToken)
 	client.SetToken(cent.SocketToken)
 	//defer func() { _ = client.Close() }()
 	doneCh := make(chan error, 1)
@@ -125,25 +127,49 @@ func (cent *Centrifuge) Connect() {
 	}
 
 	cent.Client = client
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			log.Fatal(client.Close())
+		}
+	}()
 }
 
-type ChannelTokenResponse struct {
-	Channels []map[string]string `json:"channels"`
-}
+func (cent *Centrifuge) Subscribe(ctx context.Context) {
+	sub, err := cent.Client.NewSubscription(cent.Channel)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	log.Println(sub.Channel())
+	handler := &testPublishHandler{
+		onPublish: func(c *centrifuge.Subscription, e centrifuge.PublishEvent) {
+			log.Printf("%#v\n", e)
+		},
+	}
+	sub.OnPublish(handler)
 
-type ChannelTokenRequest struct {
-	Channels []string `json:"channels"`
-	Client   string   `json:"client"`
+	err = sub.Subscribe()
+	if err != nil {
+		return
+	}
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			log.Fatal(sub.Close())
+		}
+	}()
 }
 
 func (cent *Centrifuge) GetChannelToken() error {
-	channelToken := ChannelTokenResponse{}
-	request := ChannelTokenRequest{
+	r := request.SubscribeChannel{
 		Channels: []string{cent.Channel},
 		Client:   cent.ClientID,
 	}
+	channelToken := response.SubscribeChannel{}
 	resp, err := req.R().
-		SetBody(request).
+		SetBody(r).
 		SetResult(&channelToken).
 		SetBearerAuthToken(cent.AccessToken).
 		SetContentType("application/json").
@@ -159,22 +185,4 @@ func (cent *Centrifuge) GetChannelToken() error {
 	cent.ChannelToken = channelToken.Channels[0]["token"]
 
 	return nil
-}
-
-func (cent *Centrifuge) Subscribe() {
-	sub, err := cent.Client.NewSubscription(cent.Channel)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	log.Println(sub.Channel())
-	handler := &testPublishHandler{
-		onPublish: func(c *centrifuge.Subscription, e centrifuge.PublishEvent) {
-			log.Printf("%#v\n", e)
-		},
-	}
-	sub.OnPublish(handler)
-	err = sub.Subscribe()
-	if err != nil {
-		return
-	}
 }
