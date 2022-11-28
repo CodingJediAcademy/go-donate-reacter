@@ -12,6 +12,7 @@ import (
 func main() {
 	a := app.New()
 	a.Start()
+	defer a.Stop()
 
 	signChan := make(chan os.Signal, 1)
 	signal.Notify(signChan, os.Interrupt, syscall.SIGTERM)
