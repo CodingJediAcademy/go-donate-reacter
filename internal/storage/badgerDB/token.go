@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"encoding/gob"
 	"github.com/dgraph-io/badger/v3"
-	"go-donate-reacter/internal/services/donationalerts/response"
+	"golang.org/x/oauth2"
 )
 
-func (s *Storage) SaveToken(token response.Token) error {
+func (s *Storage) SaveToken(token *oauth2.Token) error {
 	err := s.db.Update(func(txn *badger.Txn) error {
 		var buf bytes.Buffer
 		enc := gob.NewEncoder(&buf)
@@ -26,10 +26,10 @@ func (s *Storage) SaveToken(token response.Token) error {
 	return err
 }
 
-func (s *Storage) GetToken() (response.Token, error) {
-	var token response.Token
+func (s *Storage) GetToken() (*oauth2.Token, error) {
+	var token oauth2.Token
 	err := s.db.View(func(txn *badger.Txn) error {
-		item, err := txn.Get([]byte("answer"))
+		item, err := txn.Get([]byte("token"))
 		if err != nil {
 			return err
 		}
@@ -49,5 +49,5 @@ func (s *Storage) GetToken() (response.Token, error) {
 		return nil
 	})
 
-	return token, err
+	return &token, err
 }
