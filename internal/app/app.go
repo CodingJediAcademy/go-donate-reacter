@@ -7,14 +7,13 @@ import (
 	"go-donate-reacter/internal/storage/badgerDB"
 	"log"
 	"os"
-	"time"
 )
 
 type App struct {
 	Storage badgerDB.Storage
 
-	codeChan      chan string
-	ctxCancelFunc context.CancelFunc
+	oauthCodeChan chan string
+	ctxCancelFunc []context.CancelFunc
 }
 
 func New() App {
@@ -24,24 +23,31 @@ func New() App {
 	}
 }
 
-func (a *App) Start() {
+func (a *App) ctxGenerate() *context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
-	a.ctxCancelFunc = cancel
-	a.codeChan = make(chan string, 1)
+	a.ctxCancelFunc = append(a.ctxCancelFunc, cancel)
+
+	return &ctx
+}
+
+func (a *App) Start() {
+	a.oauthCodeChan = make(chan string, 1)
 
 	a.Storage.Init()
 
-	a.httpServerStart(ctx)
-	a.connectToDA(ctx)
+	a.httpServerStart(*a.ctxGenerate())
+	a.connectToDA(*a.ctxGenerate())
 }
 
 func (a *App) Stop() {
 	a.Storage.Close()
-	a.ctxCancelFunc()
+	for _, cancelFunc := range a.ctxCancelFunc {
+		cancelFunc()
+	}
 }
 
 func (a *App) httpServerStart(ctx context.Context) {
-	server := http.NewServer(":13077", a.codeChan)
+	server := http.NewServer(":13077", a.oauthCodeChan)
 	server.Run(ctx)
 }
 
@@ -56,7 +62,7 @@ func (a *App) connectToDA(ctx context.Context) {
 		os.Getenv("GDR_DA_CLIENT_ID"),
 		os.Getenv("GDR_DA_CLIENT_SECRET"),
 		os.Getenv("GDR_DA_REDIRECT_URL"),
-		a.codeChan,
+		a.oauthCodeChan,
 		daToken,
 	)
 
@@ -68,7 +74,6 @@ func (a *App) connectToDA(ctx context.Context) {
 	if err != nil {
 		log.Println(err)
 	}
-	log.Printf("%#v", profile)
 
 	cent := donationalerts.Centrifuge{
 		AccessToken: daClient.Token.AccessToken,
@@ -77,6 +82,4 @@ func (a *App) connectToDA(ctx context.Context) {
 	}
 
 	cent.Connect(ctx)
-	time.Sleep(time.Duration(2) * time.Second)
-	cent.Subscribe(ctx)
 }

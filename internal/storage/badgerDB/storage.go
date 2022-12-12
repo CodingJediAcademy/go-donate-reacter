@@ -18,8 +18,9 @@ func NewStorage() Storage {
 func (s *Storage) Init() {
 	filePath := s.dataDirInit()
 
-	opt := badger.DefaultOptions(filePath)
-	opt.BlockCacheSize = 100 << 20
+	opt := badger.DefaultOptions(filePath).
+		WithLoggingLevel(badger.WARNING).
+		WithBlockCacheSize(100 << 20)
 
 	db, err := badger.Open(opt)
 	if err != nil {

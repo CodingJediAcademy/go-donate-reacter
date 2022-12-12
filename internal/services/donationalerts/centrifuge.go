@@ -2,7 +2,6 @@ package donationalerts
 
 import (
 	"github.com/centrifugal/centrifuge-go"
-	"github.com/gofiber/fiber/v2"
 	"github.com/imroc/req/v3"
 	"go-donate-reacter/internal/services/donationalerts/request"
 	"go-donate-reacter/internal/services/donationalerts/response"
@@ -17,13 +16,18 @@ const (
 )
 
 type Centrifuge struct {
-	AccessToken  string
-	SocketToken  string
-	UserID       int64
-	ClientID     string
-	Channel      string
-	ChannelToken string
-	Client       *centrifuge.Client
+	AccessToken string
+	SocketToken string
+	UserID      int64
+	ClientID    string
+	Channel     Channel
+	Sub         *centrifuge.Subscription
+	Client      *centrifuge.Client
+}
+
+type Channel struct {
+	ID    string
+	Token string
 }
 
 type testPublishHandler struct {
@@ -82,26 +86,28 @@ func (cent *Centrifuge) Connect(ctx context.Context) {
 		Name:                 centrifuge.DefaultName,
 	})
 	client.SetToken(cent.SocketToken)
-	//defer func() { _ = client.Close() }()
 	handler := &testEventHandler{
 		onConnect: func(c *centrifuge.Client, e centrifuge.ConnectEvent) {
-			log.Printf("%#v\n", e)
+			log.Println("[cent] connected to wss.")
+			//log.Printf("[cent] %#v\n", e)
 			cent.ClientID = e.ClientID
-			cent.Channel = "$alerts:donation_" + strconv.FormatInt(cent.UserID, 10)
-			err := cent.GetChannelToken()
-			if err != nil {
-				log.Fatalln(err)
+			if err := cent.GetChannelToken(); err != nil {
+				log.Fatalln("[cent] fatal ", err)
 			}
+			cent.Sub = cent.Subscribe()
 		},
 		onDisconnect: func(c *centrifuge.Client, e centrifuge.DisconnectEvent) {
-			log.Printf("%#v\n", e)
+			log.Println("[cent] disconnected")
+			//log.Printf("[cent] %#v\n", e)
 		},
 		onMessage: func(c *centrifuge.Client, e centrifuge.MessageEvent) {
-			log.Printf("%#v\n", e)
+			log.Println("[cent] onMessage")
+			log.Printf("[cent] %#v\n", e)
 		},
 		onPrivateSub: func(c *centrifuge.Client, e centrifuge.PrivateSubEvent) (string, error) {
-			log.Printf("%#v\n", e)
-			return cent.ChannelToken, nil
+			log.Println("[cent] subscribing to private channel...")
+			//log.Printf("[cent] %#v\n", e)
+			return cent.Channel.Token, nil
 		},
 	}
 	client.OnConnect(handler)
@@ -109,9 +115,8 @@ func (cent *Centrifuge) Connect(ctx context.Context) {
 	client.OnMessage(handler)
 	client.OnPrivateSub(handler)
 
-	err := client.Connect()
-	if err != nil {
-		log.Fatalln(err)
+	if err := client.Connect(); err != nil {
+		log.Fatalln("[cent] fatal ", err)
 	}
 
 	cent.Client = client
@@ -119,40 +124,46 @@ func (cent *Centrifuge) Connect(ctx context.Context) {
 	go func() {
 		select {
 		case <-ctx.Done():
-			log.Fatal(client.Close())
+			log.Println("[cent] closing all connections")
+			if cent.Sub != nil {
+				if err := cent.Sub.Close(); err != nil {
+					log.Println("[cent] ", err)
+				}
+			}
+			if err := client.Close(); err != nil {
+				log.Println("[cent] ", err)
+			}
 		}
 	}()
 }
 
-func (cent *Centrifuge) Subscribe(ctx context.Context) {
-	sub, err := cent.Client.NewSubscription(cent.Channel)
+func (cent *Centrifuge) Subscribe() *centrifuge.Subscription {
+	sub, err := cent.Client.NewSubscription(cent.Channel.ID)
 	if err != nil {
-		log.Fatalln(err)
+		log.Println("[cent] ", err)
 	}
-	log.Println(sub.Channel())
+
 	handler := &testPublishHandler{
 		onPublish: func(c *centrifuge.Subscription, e centrifuge.PublishEvent) {
-			log.Printf("%#v\n", string(e.Data))
+			// TODO: main logic entry point
+			log.Println("[cent] Donation received.")
+			log.Printf("[cent] %#v\n", string(e.Data))
 		},
 	}
 	sub.OnPublish(handler)
 
-	err = sub.Subscribe()
-	if err != nil {
-		return
+	if err = sub.Subscribe(); err != nil {
+		log.Println("[cent] ", err)
 	}
 
-	go func() {
-		select {
-		case <-ctx.Done():
-			log.Fatal(sub.Close())
-		}
-	}()
+	log.Println("[cent] subscribed. Waiting for donations... :)")
+	return sub
 }
 
 func (cent *Centrifuge) GetChannelToken() error {
+	channel := "$alerts:donation_" + strconv.FormatInt(cent.UserID, 10)
 	r := request.SubscribeChannel{
-		Channels: []string{cent.Channel},
+		Channels: []string{channel},
 		Client:   cent.ClientID,
 	}
 	channelToken := response.SubscribeChannel{}
@@ -163,14 +174,17 @@ func (cent *Centrifuge) GetChannelToken() error {
 		SetContentType("application/json").
 		Post(DA_HOST + "/api/v1/centrifuge/subscribe")
 
-	if err != nil || !resp.IsSuccess() {
-		log.Println(err)
-		return fiber.NewError(http.StatusInternalServerError, "cannot get channel token")
+	if err != nil {
+		return err
 	}
 
-	log.Printf("%#v\n", channelToken)
+	if !resp.IsSuccess() {
+		log.Println("[cent] ", resp.String())
+		return resp.Err
+	}
 
-	cent.ChannelToken = channelToken.Channels[0]["token"]
+	cent.Channel.ID = channel
+	cent.Channel.Token = channelToken.Channels[0]["token"]
 
 	return nil
 }
