@@ -74,6 +74,9 @@ func (a *App) connectToDA(ctx context.Context) {
 	if err != nil {
 		log.Println(err)
 	}
+	if err := a.Storage.SaveProfile(profile); err != nil {
+		log.Println(err)
+	}
 
 	cent := donationalerts.Centrifuge{
 		AccessToken: daClient.Token.AccessToken,
